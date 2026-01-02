@@ -1,34 +1,77 @@
 using BepInEx;
-using System.IO;
+using BepInEx.Configuration;
+using BepInEx.Logging;
+using GlobalEnums;
+using HarmonyLib;
+using Silksong.DataManager;
+using Silksong.ModMenu;
+using Silksong.ModMenu.Elements;
+using Silksong.ModMenu.Plugin;
+using Silksong.ModMenu.Screens;
 using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
+using System.IO;
 using System.Reflection;
 using UnityEngine;
 using UnityEngine.UI;
-using GlobalEnums;
-using HarmonyLib;
-using BepInEx.Logging;
-using System.Collections.Generic;
-using BepInEx.Configuration;
 
 namespace FleaScoreCounter
 {
+
+    internal static class FleaSimpleCounterNames
+    {
+        internal static string juggleName = "Flea Games Counter";
+        internal static string bounceName = "Flea Games Counter Bounce Variant";
+        internal static string dodgeName = "Flea Games Counter Dodge";
+        internal static string[] names = [juggleName, bounceName, dodgeName];
+    }
+    public class SaveData
+    {
+        private static SaveData? _instance;
+
+        [AllowNull]
+        public static SaveData Instance
+        {
+            get
+            {
+                if (_instance == null)
+                {
+                    _instance = new();
+                }
+                return _instance;
+            }
+            set
+            {
+                _instance = value;
+            }
+        }
+
+        public Dictionary<string, int> highScores { get; set; }  = new()
+        {
+            { FleaSimpleCounterNames.dodgeName, 0},
+            { FleaSimpleCounterNames.juggleName, 0},
+            { FleaSimpleCounterNames.bounceName, 0},
+        };
+    }
     internal class FleaCounter
     {
+        
         public string name;
         public Vector2 position;
         public Text textObject;
         
-        public FleaCounter(string name, Vector2 position, GameObject parent)
+        public FleaCounter(string name, Vector2 position, GameObject parent, int count)
         {
             this.name = name;
             this.position = position;
 
             GameObject GO= new GameObject() { name= this.name + " Counter"};
             this.textObject = GO.AddComponent<Text>();
-                GO.AddComponent<CanvasRenderer>();
                 textObject.fontSize = FleaScoreCounterPlugin.fontSize;
                 textObject.font = Font.GetDefault();
-                textObject.text = "0";
+                textObject.text = count.ToString();
                 textObject.alignment = TextAnchor.MiddleCenter;
             GO.GetComponent<RectTransform>().SetParent(parent.transform);
             GO.transform.localPosition = position;
@@ -36,13 +79,12 @@ namespace FleaScoreCounter
     }
 
     // TODO - adjust the plugin guid as needed
-    [BepInAutoPlugin()]
+    [BepInDependency("org.silksong-modding.datamanager")]
+    [BepInDependency("org.silksong-modding.modmenu")]
+    [BepInAutoPlugin(id:"io.github.randomscorp.fleascorecounter",version:"1.1.0")]
     [Harmony]
-    public partial class FleaScoreCounterPlugin : BaseUnityPlugin
+    public partial class FleaScoreCounterPlugin : BaseUnityPlugin, ISaveDataMod<SaveData>, IModMenuCustomMenu
     {
-        private const string juggleName = "Flea Games Counter";
-        private const string bounceName = "Flea Games Counter Bounce Variant";
-        private const string dodgeName = "Flea Games Counter Dodge";
 
         public static FleaScoreCounterPlugin __instance;
         internal static int fontSize = 30;
@@ -51,6 +93,12 @@ namespace FleaScoreCounter
         internal Image fleaCounterImage;
 
         internal Dictionary<string, FleaCounter> fleaCounterDict = new Dictionary<string, FleaCounter>();
+
+        SaveData? ISaveDataMod<SaveData>.SaveData
+        {
+            get => SaveData.Instance;
+            set => SaveData.Instance = value;
+        }
 
         private void Awake()
         {
@@ -62,7 +110,7 @@ namespace FleaScoreCounter
                         1f,
                         new ConfigDescription("Flea counter's Scale", new AcceptableValueRange<float>(0, 5))
                     );
-
+             
             scale.SettingChanged += (_, _) => fleaCounterImage.transform.localScale = new Vector2(fleaCounterImage.sprite.texture.width, fleaCounterImage.sprite.texture.height) / fleaCounterImage.sprite.texture.height * scale.Value;
 
 
@@ -84,14 +132,14 @@ namespace FleaScoreCounter
                 fleaCounter.AddComponent<FleaCounterPostioner>();
 
             fleaCounterDict.Add(
-                    juggleName, new FleaCounter(juggleName, new Vector2(-85, -98), fleaCounter)
+                    FleaSimpleCounterNames.juggleName, new FleaCounter(FleaSimpleCounterNames.juggleName, new Vector2(-85, -98), fleaCounter, 0)
                 );
 
             fleaCounterDict.Add(
-                    dodgeName, new FleaCounter(dodgeName, new Vector2(-49, -98), fleaCounter)
+                    FleaSimpleCounterNames.dodgeName, new FleaCounter(FleaSimpleCounterNames.dodgeName, new Vector2(-49, -98), fleaCounter, 0)
                 );
             fleaCounterDict.Add(
-                    bounceName, new FleaCounter(bounceName, new Vector2(-12, -98), fleaCounter)
+                    FleaSimpleCounterNames.bounceName, new FleaCounter(FleaSimpleCounterNames.bounceName, new Vector2(-12, -98), fleaCounter, 0)
                 );
 
             fleaCounterImage.transform.localScale *=scale.Value;
@@ -99,16 +147,30 @@ namespace FleaScoreCounter
             new Harmony(Id).PatchAll();
         }
 
+        [HarmonyPatch(typeof(HeroController), nameof(HeroController.Awake))]
+        [HarmonyPrefix]
+        private static void FillCounter()
+        {
+            foreach(string name in FleaSimpleCounterNames.names)
+            {
+                FleaScoreCounterPlugin.__instance.fleaCounterDict[name].textObject.text = SaveData.Instance.highScores[name].ToString();
+            }
+        }
+
         [HarmonyPatch(typeof(SimpleCounter),nameof(SimpleCounter.Increment))]
         [HarmonyPostfix]
         private static void FleaCounterUpdate(SimpleCounter __instance)
         {
             var counter = FleaScoreCounterPlugin.__instance.fleaCounterDict.GetValueOrDefault(__instance.gameObject.name);
-            if (counter != null && __instance.count >= Int32.Parse(counter.textObject.text))
+            if (counter != null && __instance.count >= SaveData.Instance.highScores[__instance.gameObject.name])
+            {
+                SaveData.Instance.highScores[__instance.gameObject.name] = __instance.count;
                 counter.textObject.text = __instance.count.ToString();
+            }
         }
 
         // Keeps the couter in place when the resolution changes
+        // TODO: change it to events
         public class FleaCounterPostioner: MonoBehaviour
         {
             void FixedUpdate()
@@ -117,7 +179,6 @@ namespace FleaScoreCounter
                 image.rectTransform.localPosition = this.gameObject.transform.parent.localPosition;
             }
         }
-
         public static Sprite GetImageFromResources()
         {
             var stream = Assembly.GetExecutingAssembly().
@@ -137,5 +198,44 @@ namespace FleaScoreCounter
             sprite.name = "flea counter sprite";
             return sprite;
         }
+
+        public AbstractMenuScreen BuildCustomMenu()
+        {
+            var menu =  new SimpleMenuScreen("Flea Score Counter");
+
+            menu.Add(
+                    new TextButton("Reset Juggle")
+                    {
+                        OnSubmit = () => {
+                            SaveData.Instance.highScores[FleaSimpleCounterNames.juggleName] = 0;
+                            FleaScoreCounterPlugin.__instance.fleaCounterDict[FleaSimpleCounterNames.juggleName].textObject.text = 0.ToString();
+                        }
+                    }
+                );
+
+            menu.Add(
+                    new TextButton("Reset Dodge")
+                    {
+                        OnSubmit = () => {
+                            SaveData.Instance.highScores[FleaSimpleCounterNames.dodgeName] = 0;
+                            FleaScoreCounterPlugin.__instance.fleaCounterDict[FleaSimpleCounterNames.dodgeName].textObject.text = 0.ToString();
+                        }
+                    }
+                );
+
+            menu.Add(
+                    new TextButton("Reset Bounce")
+                    {
+                        OnSubmit = () => {
+                            SaveData.Instance.highScores[FleaSimpleCounterNames.bounceName] = 0;
+                            FleaScoreCounterPlugin.__instance.fleaCounterDict[FleaSimpleCounterNames.bounceName].textObject.text = 0.ToString();
+                        }
+                    }
+                );
+
+            return menu;
+        }
+
+        public string ModMenuName() => "Flea Score Counter";
     }
 }

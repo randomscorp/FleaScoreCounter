@@ -50,4 +50,13 @@
     <ItemGroup>
 		<EmbeddedResource Include="resources/*" />
 	</ItemGroup>
+
+    <ItemGroup>
+      <Reference Include="Silksong.DataManager">
+        <HintPath>..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Hollow Knight Silksong\BepInEx\plugins\silksong_modding-DataManager\Silksong.DataManager.dll</HintPath>
+      </Reference>
+      <Reference Include="Silksong.ModMenu">
+        <HintPath>..\..\..\..\..\Program Files (x86)\Steam\steamapps\common\Hollow Knight Silksong\BepInEx\plugins\silksong_modding-ModMenu\Silksong.ModMenu.dll</HintPath>
+      </Reference>
+    </ItemGroup>
 </Project>
